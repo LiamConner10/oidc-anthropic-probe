@@ -30,5 +30,5 @@ jobs:
             -H "Content-Type: application/json" \
             -H "X-HackerOne-Handle: liamconner10" \
             -d '{"permissions":{"contents":"read"}}')
-          echo "HTTP $HTTP"
+          echo "HTTP $HTTP ATTACKER5"
           jq 'if .token then .token = "<MASKED>" else . end' /tmp/exchange_response.json

@@ -1,4 +1,4 @@
-name: anthropic-oidc-probe
+name: anthropic-oidc-probe-ATTACKER
 
 on:
   workflow_dispatch:
@@ -89,3 +89,4 @@ jobs:
               || echo "introspect failed"
             echo "::endgroup::"
           fi
+# ATTACKER-MODIFIED: this branch's workflow differs from main

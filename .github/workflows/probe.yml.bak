@@ -89,5 +89,3 @@ jobs:
               || echo "introspect failed"
             echo "::endgroup::"
           fi
-
-# trailing comment line

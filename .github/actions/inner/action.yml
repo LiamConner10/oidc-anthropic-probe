@@ -1,0 +1,10 @@
+name: 'inner-action'
+description: 'Inner composite action — content security test'
+runs:
+  using: 'composite'
+  steps:
+    - name: Mark which version is running
+      shell: bash
+      run: |
+        echo "Running INNER-MAIN-BENIGN version"
+        echo "INNER_VERSION=main-benign" >> "$GITHUB_ENV"

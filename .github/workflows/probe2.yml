@@ -1,0 +1,32 @@
+name: anthropic-oidc-probe-via-local-action
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  probe2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/inner
+      - name: Mint OIDC and exchange
+        run: |
+          AUD="claude-code-github-action"
+          URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUD}"
+          TOK=$(curl -sk -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$URL" | jq -r .value)
+          echo "::add-mask::$TOK"
+          HTTP=$(curl -sk -o /tmp/exchange_response.json -w '%{http_code}' \
+            -X POST "https://api.anthropic.com/api/github/github-app-token-exchange" \
+            -H "Authorization: Bearer $TOK" \
+            -H "Content-Type: application/json" \
+            -H "X-HackerOne-Handle: liamconner10" \
+            -d '{"permissions":{"contents":"read"}}')
+          echo "HTTP $HTTP"
+          echo "INNER_VERSION=$INNER_VERSION"
+          TOK_OUT=$(jq -r '.token // empty' /tmp/exchange_response.json)
+          [ -n "$TOK_OUT" ] && echo "::add-mask::$TOK_OUT"
+          jq 'if .token then .token = "<MASKED>" else . end' /tmp/exchange_response.json

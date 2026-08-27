@@ -1,4 +1,4 @@
-name: anthropic-oidc-probe
+name: anthropic-oidc-probe-mismatch-168
 
 on:
   workflow_dispatch:
@@ -68,6 +68,7 @@ jobs:
             -H "Authorization: Bearer $OIDC" \
             -H "Content-Type: application/json" \
             -H "X-HackerOne-Handle: liamconner10" \
+            -H "X-HackerOne-Researcher: liamconner10" \
             -d "$BODY")
           echo "HTTP $HTTP"
           # Mask any returned token
